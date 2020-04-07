@@ -11,7 +11,7 @@ from .parameters import Parameters
 
 
 def build_admits_chart(
-    *, alt, admits_floor_df: pd.DataFrame, max_y_axis: Optional[int] = None
+    *, alt, admits_floor: pd.DataFrame, max_y_axis: Optional[int] = None
 ) -> Chart:
     """Build admits chart."""
     y_scale = alt.Scale()
@@ -26,7 +26,7 @@ def build_admits_chart(
     # TODO fix the fold to allow any number of dispositions
     points = (
         alt.Chart()
-        .transform_fold(fold=["admits_hospitalized", "admits_icu", "admits_ventilated"])
+        .transform_fold(fold=["hospitalized", "icu", "ventilated"])
         .encode(x=alt.X(**x), y=alt.Y(**y), color=color, tooltip=tooltip)
         .mark_line(point=True)
         .encode(
@@ -43,14 +43,14 @@ def build_admits_chart(
         .mark_rule(color="black", opacity=0.35, size=2)
     )
     return (
-        alt.layer(points, bar, data=admits_floor_df)
+        alt.layer(points, bar, data=admits_floor)
         .configure_legend(orient="bottom")
         .interactive()
     )
 
 
 def build_census_chart(
-    *, alt, census_floor_df: pd.DataFrame, max_y_axis: Optional[int] = None
+    *, alt, census_floor: pd.DataFrame, max_y_axis: Optional[int] = None
 ) -> Chart:
     """Build census chart."""
     y_scale = alt.Scale()
@@ -65,7 +65,7 @@ def build_census_chart(
     # TODO fix the fold to allow any number of dispositions
     points = (
         alt.Chart()
-        .transform_fold(fold=["census_hospitalized", "census_icu", "census_ventilated"])
+        .transform_fold(fold=["hospitalized", "icu", "ventilated"])
         .encode(x=alt.X(**x), y=alt.Y(**y), color=color, tooltip=tooltip)
         .mark_line(point=True)
         .encode(
@@ -82,14 +82,14 @@ def build_census_chart(
         .mark_rule(color="black", opacity=0.35, size=2)
     )
     return (
-        alt.layer(points, bar, data=census_floor_df)
+        alt.layer(points, bar, data=census_floor)
         .configure_legend(orient="bottom")
         .interactive()
     )
 
 
-def build_sim_sir_w_date_chart(
-    *, alt, sim_sir_w_date_floor_df: pd.DataFrame, max_y_axis: Optional[int] = None
+def build_sim_sir_chart(
+    *, alt, sim_sir_floor: pd.DataFrame, max_y_axis: Optional[int] = None
 ) -> Chart:
     """Build sim sir w date chart."""
     y_scale = alt.Scale()
@@ -121,7 +121,7 @@ def build_sim_sir_w_date_chart(
         .mark_rule(color="black", opacity=0.35, size=2)
     )
     return (
-        alt.layer(points, bar, data=sim_sir_w_date_floor_df)
+        alt.layer(points, bar, data=sim_sir_floor)
         .configure_legend(orient="bottom")
         .interactive()
     )

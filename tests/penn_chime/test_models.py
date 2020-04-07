@@ -114,88 +114,92 @@ def test_model_first_hosp_fit(param):
 
 
 def test_model_raw_start(model, param):
-    raw_df = model.raw_df
+    raw = model.sim_sir
 
     # test the things n_days creates, which in turn tests sim_sir, sir, and get_dispositions
 
     # print('n_days: %s; i_day: %s' % (param.n_days, model.i_day))
-    assert len(raw_df) == (len(np.arange(-model.i_day, param.n_days + 1))) == 104
+    assert len(raw['day']) == (len(np.arange(-model.i_day, param.n_days + 1))) == 104
 
-    first = raw_df.iloc[0, :]
-    second = raw_df.iloc[1, :]
+    assert raw['susceptible'][0] == 499600.0
+    assert round(raw['susceptible'][1], 0) == 449.0
 
-    assert first.susceptible == 499600.0
-    assert round(second.infected, 0) == 449.0
-    assert list(model.dispositions_df.loc[0, [
-        "day",
-        "date",
-        "ever_hospitalized",
-        "ever_icu",
-        "ever_ventilated",
-    ]]) == [
+    first = [
+        raw[key][0]
+        for key in (
+            "day",
+            "date",
+            "ever_hospitalized",
+            "ever_icu",
+            "ever_ventilated",
+        )
+    ]
+
+    assert first == [
         -43,
         date(year=2020, month=2, day=14),
         1.0,
         0.4,
         0.2,
     ]
-    assert round(raw_df.recovered[30], 0) == 7083.0
+    assert round(raw['recovered'][30], 0) == 7083.0
 
-    d, dt, hosp, icu, vent = list(model.dispositions_df.loc[60, [
-        "day",
-        "date",
-        "ever_hospitalized",
-        "ever_icu",
-        "ever_ventilated",
-    ]])
+    d, dt, hosp, icu, vent = [
+        raw[key][60]
+        for key in (
+            "day",
+            "date",
+            "ever_hospitalized",
+            "ever_icu",
+            "ever_ventilated",
+        )
+    ]
     assert dt == date(year=2020, month=4, day=14)
     assert [round(v, 0) for v in (d, hosp, icu, vent)] == [17, 549.0, 220.0, 110.0]
 
 
 def test_model_conservation(param, model):
-    raw_df = model.raw_df
+    raw = model.sim_sir
 
-    assert (0.0 <= raw_df.susceptible).all()
-    assert (0.0 <= raw_df.infected).all()
-    assert (0.0 <= raw_df.recovered).all()
+    assert (0.0 <= raw['susceptible']).all()
+    assert (0.0 <= raw['infected']).all()
+    assert (0.0 <= raw['recovered']).all()
 
-    diff = raw_df.susceptible + raw_df.infected + raw_df.recovered - param.population
+    diff = raw['susceptible'] + raw['infected'] + raw['recovered'] - param.population
     assert (diff < 0.1).all()
 
-    assert (raw_df.susceptible <= param.population).all()
-    assert (raw_df.infected <= param.population).all()
-    assert (raw_df.recovered <= param.population).all()
+    assert (raw['susceptible'] <= param.population).all()
+    assert (raw['infected'] <= param.population).all()
+    assert (raw['recovered'] <= param.population).all()
 
 
 def test_model_raw_end(param, model):
-    raw_df = model.raw_df
-    last = raw_df.iloc[-1, :]
-    assert round(last.susceptible, 0) == 83391.0
+    raw = model.raw
+    assert round(raw['susceptible'][-1], 0) == 83391.0
 
 
 def test_model_monotonicity(param, model):
-    raw_df = model.raw_df
+    raw = model.sim_sir
 
     # Susceptible population should be non-increasing, and Recovered non-decreasing
-    assert (raw_df.susceptible[1:] - raw_df.susceptible.shift(1)[1:] <= 0).all()
-    assert (raw_df.recovered[1:] - raw_df.recovered.shift(1)[1:] >= 0).all()
+    assert (raw['susceptible'][1:] - raw['susceptible'].shift(1)[1:] <= 0).all()
+    assert (raw['recovered'][1:] - raw['recovered'].shift(1)[1:] >= 0).all()
 
 
 def test_model_cumulative_census(param, model):
     # test that census is being properly calculated
-    raw_df = model.raw_df
-    admits_df = model.admits_df
+    raw = model.raw
     df = pd.DataFrame(
         {
-            "hospitalized": admits_df.admits_hospitalized,
-            "icu": admits_df.admits_icu,
-            "ventilated": admits_df.admits_ventilated,
+            "hospitalized": raw['admits_hospitalized'],
+            "icu": raw['admits_icu'],
+            "ventilated": raw['admits_ventilated'],
         }
     )
     admits = df.cumsum()
 
     # TODO: is 1.0 for ceil function?
     diff = admits.hospitalized[1:-1] - (
-        0.05 * 0.05 * (raw_df.infected[1:-1] + raw_df.recovered[1:-1]) - 1.0
+        0.05 * 0.05 * (raw['infected'][1:-1] + raw['recovered'][1:-1]) - 1.0
     )
     assert (diff.abs() < 0.1).all()

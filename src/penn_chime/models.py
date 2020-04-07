@@ -72,7 +72,7 @@ class SimSirModel:
             raw = self.run_projection(p, [(self.beta, p.n_days)])
             self.i_day = i_day = int(get_argmin_ds(raw["census_hospitalized"], p.current_hospitalized))
 
-            self.raw = self.run_projection(p, self.gen_policy(p))
+            self.raw = self.run_projection(p, self.get_policies(p))
 
             logger.info('Set i_day = %s', i_day)
             p.date_first_hospitalized = p.current_date - timedelta(days=i_day)
@@ -109,7 +109,7 @@ class SimSirModel:
             intrinsic_growth_rate = get_growth_rate(p.doubling_time)
             self.beta = get_beta(intrinsic_growth_rate, self.gamma, self.susceptible, 0.0)
             self.beta_t = get_beta(intrinsic_growth_rate, self.gamma, self.susceptible, p.relative_contact_rate)
-            self.raw = self.run_projection(p, self.gen_policy(p))
+            self.raw = self.run_projection(p, self.get_policies(p))
 
             self.population = p.population
         else:
@@ -118,39 +118,48 @@ class SimSirModel:
                 p.doubling_time,
                 p.date_first_hospitalized,
             )
-            raise AssertionError('doubling_time or date_first_hospitalized must be provided.')
+            raise AssertionError(
+                'doubling_time or date_first_hospitalized must be provided.')
 
-        self.raw["date"] = self.raw["day"].astype("timedelta64[D]") + np.datetime64(p.current_date)
+        i_day = self.i_day
+        raw = self.raw
+        days = raw["day"]
+        dates = raw["date"] = (
+            days.astype("timedelta64[D]")
+            + np.datetime64(p.current_date)
+        )
 
-        self.raw_df = pd.DataFrame(data=self.raw)
-        self.dispositions_df = pd.DataFrame(data={
-            'day': self.raw['day'],
-            'date': self.raw['date'],
-            'ever_hospitalized': self.raw['ever_hospitalized'],
-            'ever_icu': self.raw['ever_icu'],
-            'ever_ventilated': self.raw['ever_ventilated'],
+        self.sim_sir = pd.DataFrame(data={
+            "day": days,
+            "date": dates,
+            **{
+                key: raw[key]
+                for key in self.keys
+            }
         })
-        self.admits_df = pd.DataFrame(data={
-            'day': self.raw['day'],
-            'date': self.raw['date'],
-            'admits_hospitalized': self.raw['admits_hospitalized'],
-            'admits_icu': self.raw['admits_icu'],
-            'admits_ventilated': self.raw['admits_ventilated'],
+        self.admits = pd.DataFrame(data={
+            'day': days,
+            'date': dates,
+            **{
+                key: raw['admits_' + key]
+                for key in p.dispositions.keys()
+            }
         })
-        self.census_df = pd.DataFrame(data={
-            'day': self.raw['day'],
-            'date': self.raw['date'],
-            'census_hospitalized': self.raw['census_hospitalized'],
-            'census_icu': self.raw['census_icu'],
-            'census_ventilated': self.raw['census_ventilated'],
+        self.census = pd.DataFrame(data={
+            'day': days,
+            'date': dates,
+            **{
+                key: raw['census_' + key]
+                for key in p.dispositions.keys()
+            }
         })
 
-        logger.info('len(np.arange(-i_day, n_days+1)): %s', len(np.arange(-self.i_day, p.n_days+1)))
-        logger.info('len(raw_df): %s', len(self.raw_df))
+        logger.info('len(np.arange(-i_day, n_days+1)): %s', len(np.arange(-i_day, p.n_days+1)))
+        logger.info('len(raw): %s', len(raw['day']))
 
-        self.infected = self.raw_df['infected'].values[self.i_day]
-        self.susceptible = self.raw_df['susceptible'].values[self.i_day]
-        self.recovered = self.raw_df['recovered'].values[self.i_day]
+        self.infected = raw['infected'][i_day]
+        self.susceptible = raw['susceptible'][i_day]
+        self.recovered = raw['recovered'][i_day]
 
         self.intrinsic_growth_rate = intrinsic_growth_rate
 
@@ -162,11 +171,9 @@ class SimSirModel:
             self.beta_t * susceptible - gamma + 1)
         self.doubling_time_t = doubling_time_t
 
-        self.sim_sir_w_date_df = build_sim_sir_w_date_df(self.raw_df, p.current_date, self.keys)
-
-        self.sim_sir_w_date_floor_df = build_floor_df(self.sim_sir_w_date_df, self.keys, "")
-        self.admits_floor_df = build_floor_df(self.admits_df, p.dispositions.keys(), "admits_")
-        self.census_floor_df = build_floor_df(self.census_df, p.dispositions.keys(), "census_")
+        self.sim_sir_floor = build_floor(self.sim_sir, self.keys)
+        self.admits_floor = build_floor(self.admits, p.dispositions.keys())
+        self.census_floor = build_floor(self.census, p.dispositions.keys())
 
         self.daily_growth_rate = get_growth_rate(p.doubling_time)
         self.daily_growth_rate_t = get_growth_rate(self.doubling_time_t)
@@ -178,7 +185,7 @@ class SimSirModel:
             self.beta = get_beta(intrinsic_growth_rate, self.gamma, self.susceptible, 0.0)
             self.beta_t = get_beta(intrinsic_growth_rate, self.gamma, self.susceptible, p.relative_contact_rate)
 
-            raw = self.run_projection(p, self.gen_policy(p))
+            raw = self.run_projection(p, self.get_policies(p))
 
             # Skip values the would put the fit past peak
             peak_admits_day = raw["admits_hospitalized"].argmax()
@@ -192,7 +199,7 @@ class SimSirModel:
         min_loss = pd.Series(losses).argmin()
         return min_loss
 
-    def gen_policy(self, p: Parameters) -> Sequence[Tuple[float, int]]:
+    def get_policies(self, p: Parameters) -> Sequence[Tuple[float, int]]:
         if p.mitigation_date is not None:
             mitigation_day = -(p.current_date - p.mitigation_date).days
         else:
@@ -211,7 +218,11 @@ class SimSirModel:
             (self.beta_t, post_mitigation_days),
         ]
 
-    def run_projection(self, p: Parameters, policy: Sequence[Tuple[float, int]]):
+    def run_projection(
+        self,
+        p: Parameters,
+        policy: Sequence[Tuple[float, int]],
+    ):
         raw = sim_sir(
             self.susceptible,
             self.infected,
@@ -269,23 +280,13 @@ def sir(
     i_n = (beta * s * i - gamma * i) + i
     r_n = gamma * i + r
 
-    # TODO:
-    #   Post check dfs for negative values and
-    #   warn the user that their input data is bad.
-    #   JL: I suspect that these adjustments covered bugs.
-
-    #if s_n < 0.0:
-    #    s_n = 0.0
-    #if i_n < 0.0:
-    #    i_n = 0.0
-    #if r_n < 0.0:
-    #    r_n = 0.0
     scale = n / (s_n + i_n + r_n)
     return s_n * scale, i_n * scale, r_n * scale
 
 
 def sim_sir(
-    s: float, i: float, r: float, gamma: float, i_day: int, policies: Sequence[Tuple[float, int]]
+    s: float, i: float, r: float, gamma: float, i_day: int,
+    policies: Sequence[Tuple[float, int]]
 ):
     """Simulate SIR model forward in time, returning a dictionary of daily arrays
     Parameter order has changed to allow multiple (beta, n_days)
@@ -329,29 +330,13 @@ def sim_sir(
     }
 
 
-def build_sim_sir_w_date_df(
-    raw_df: pd.DataFrame,
-    current_date: datetime,
-    keys: Sequence[str],
-) -> pd.DataFrame:
-    day = raw_df.day
+def build_floor(d, keys: Sequence[str], prefix=""):
+    """Build floor dict."""
     return pd.DataFrame({
-        "day": day,
-        "date": day.astype('timedelta64[D]') + np.datetime64(current_date),
+        "day": d.day,
+        "date": d.date,
         **{
-            key: raw_df[key]
-            for key in keys
-        }
-    })
-
-
-def build_floor_df(df, keys, prefix):
-    """Build floor sim sir w date."""
-    return pd.DataFrame({
-        "day": df.day,
-        "date": df.date,
-        **{
-            prefix + key: np.floor(df[prefix+key])
+            key: np.floor(d[prefix+key])
             for key in keys
         }
     })
@@ -360,16 +345,16 @@ def build_floor_df(df, keys, prefix):
 def calculate_dispositions(
     raw: Dict,
     rates: Dict[str, float],
-    market_share: float,
+    market_share: float
 ):
-    """Build dispositions dataframe of patients adjusted by rate and market_share."""
+    """Calculate dispositions of patients adjusted by rate and market_share."""
     for key, rate in rates.items():
         raw["ever_" + key] = raw["ever_infected"] * rate * market_share
         raw[key] = raw["ever_infected"] * rate * market_share
 
 
-def calculate_admits(raw: Dict, rates):
-    """Build admits dataframe from dispositions."""
+def calculate_admits(raw: Dict, rates: Dict[str, float]):
+    """Calculate admits from dispositions."""
     for key in rates.keys():
         ever = raw["ever_" + key]
         admit = np.empty_like(ever)
@@ -379,11 +364,8 @@ def calculate_admits(raw: Dict, rates):
         raw[key] = admit
 
 
-def calculate_census(
-    raw: Dict,
-    lengths_of_stay: Dict[str, int],
-):
-    """Average Length of Stay for each disposition of COVID-19 case (total guesses)"""
+def calculate_census(raw: Dict, lengths_of_stay: Dict[str, int]):
+    """Average days for each disposition."""
     n_days = raw["day"].shape[0]
     for key, los in lengths_of_stay.items():
         cumsum = np.empty(n_days + los)
